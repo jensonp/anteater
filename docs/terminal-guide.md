@@ -63,3 +63,23 @@ To clean up the repository and separate personal career roadmaps from the shared
 - `ssh user@ip_address`: Connect to a remote server.
 - `tail -f logs/app.log`: Watch a log file update in real-time.
 - `ps aux | grep python`: Find all running Python processes on the system.
+
+---
+
+## Log: Creating the Independent `mdc-rules` Repository
+
+To create a strictly separate, public-facing repository for just the generic MDC rules:
+
+1. **Create Remote Repository (via GH CLI):**
+   `gh repo create mdc-rules --public --description "Generic MDC rules" --confirm`
+2. **Setup Local Workspace:**
+   `mkdir -p ~/Desktop/mdc-rules/generics ~/Desktop/mdc-rules/L6-7`
+3. **Isolate Specific Files:**
+   `cp ~/bin/mdc/generics/*.mdc ~/Desktop/mdc-rules/generics/`
+   `cp ~/bin/mdc/L6-7/*.mdc ~/Desktop/mdc-rules/L6-7/`
+4. **Push to New Main:**
+   `git init`
+   `git add .`
+   `git commit -m "Initial commit"`
+   `git remote add origin https://github.com/jensonp/mdc-rules.git`
+   `git push -u origin main`
