@@ -1,0 +1,92 @@
+---
+description: Enforce non-blocking computational bounds and query efficiency to preserve event loop health at scale.
+globs:
+  - "**/*.{ts,js,py,go,java}"
+alwaysApply: false
+---
+
+# Performance & Scale — Event Loop Integrity
+
+## Purpose
+At L6/L7 scale, inefficient synchronous logic doesn't just slow down a single request; it locks up the entire thread, blocking all concurrent users and triggering cascading health check failures. Systems must proactively defend the event loop and data processing constraints.
+
+---
+
+## Rule 1 — Non-Blocking Bulk Computation
+
+Any backend logic involving large datasets (e.g., entity similarity matching, bulk scoring, massive aggregations, encryption cycles) MUST explicitly confirm it operates asynchronously and does not block the primary event loop (e.g., NodeJS V8 Event Loop).
+
+### Recommended Pattern — Worker Threads & Chunking
+
+```ts
+// For heavy CPU-bound logic (e.g. image processing or massive array mapping), 
+// offload the execution to a Worker Thread or background queue immediately.
+export class RecommendationScorer {
+  async calculateSimilarity(userId: string): Promise<Result> {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker('./similarity-worker.js', { workerData: { userId } });
+      worker.on('message', resolve);
+      worker.on('error', reject);
+    });
+  }
+}
+
+// For moderate async tasks, yield the event loop via setImmediate chunking.
+```
+
+### Anti-Pattern — V8 Locking
+
+```ts
+// Anti-Pattern: A massive synchronous 'sort' or 'map' on 100,000 items locks the Node thread. 
+// No other users can receive HTTP responses until this function finishes.
+export class RecommendationScorer {
+  calculateSimilarity(userId: string) {
+    const allRecords = get100kRecordsSync();
+    return allRecords.sort((a, b) => expensiveCalculation(a, b)); 
+  }
+}
+```
+
+---
+
+## Rule 2 — Database Pagination & Result Streaming
+
+Services MUST NEVER load an unbounded database table entirely into application memory. Queries fetching lists MUST enforce strict pagination limits (Limit/Offset or Cursors) or directly stream the results back to the client/processor.
+
+### Recommended Pattern — Streaming Data
+
+```ts
+// Process a massive CSV export by streaming rows directly to the HTTP response, 
+// using less than 50MB of RAM regardless of table size.
+export async function exportUsers(req, res) {
+  const queryStream = database.query('SELECT * FROM users').stream();
+  queryStream.pipe(transformToCSV()).pipe(res);
+}
+```
+
+### Anti-Pattern — Memory Exhaustion
+
+```ts
+// Anti-Pattern: Loading 2 million rows into memory will immediately crash the container 
+// with an OOM (Out of Memory) exception.
+export async function exportUsers(req, res) {
+  const users = await database.query('SELECT * FROM users'); // 💀 Loads everything into RAM
+  const csv = convertToCSV(users);
+  res.send(csv);
+}
+```
+
+---
+
+## Rule 3 — Cache Invalidation Defense
+
+Services handling extreme traffic MUST implement protective caching with a "stale-while-revalidate" mechanism or distributed locking. This prevents "Cache Stampedes" where a key naturally expires and 50,000 concurrent requests immediately bypass the cache and hammer the underlying database simultaneously.
+
+---
+
+## AI Checklist — Run Before Completing Any Performance Task
+
+* [ ] CPU-heavy tasks are explicitly offloaded to Worker Threads or async queues.
+* [ ] Large array iterations yield to the event loop gracefully.
+* [ ] Database fetches without explicit `LIMIT` guards rely on Streaming APIs.
+* [ ] High-volume endpoints protect against Cache Stampedes.

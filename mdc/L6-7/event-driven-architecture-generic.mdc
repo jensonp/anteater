@@ -1,0 +1,86 @@
+---
+description: Enforce asynchronous messaging safety, idempotent event handling, and Outbox guarantees for distributed state mutations.
+globs:
+  - "**/events/**/*.{ts,js,py,go,java}"
+  - "**/consumers/**/*.{ts,js,py,go,java}"
+  - "**/publishers/**/*.{ts,js,py,go,java}"
+alwaysApply: false
+---
+
+# Async & Event-Driven Safety — Distributed Truth
+
+## Purpose
+At L6/L7 scale, synchronous POST/PUT chains between microservices lead to massive latency and systemic coupling. Moving to Event-Driven Architecture (EDA) solves this, but introduces distributed transaction problems. We must guarantee that events aren't lost, aren't duplicated maliciously, and don't stall the system.
+
+---
+
+## Rule 1 — The Transactional Outbox Pattern
+
+Services MUST NOT perform dual-writes (e.g., writing to a local PostgreSQL database and then explicitly emitting a message to Kafka in the same block of code). If the process crashes between the DB commit and the Kafka emit, the system falls out of sync. Systems MUST utilize the Transactional Outbox pattern.
+
+### Recommended Pattern — Outbox Writes
+
+```ts
+// Wrap the state change AND the event emission in a single ACID transaction
+await database.transaction(async (tx) => {
+  // 1. Mutate the local domain state
+  await tx.users.update(userId, newProfile);
+  
+  // 2. Write the event to the local Outbox table inside the same transaction
+  await tx.outbox.insert({
+    topic: 'user.profile.updated',
+    payload: newProfile,
+    status: 'pending'
+  });
+});
+
+// A separate relay worker will asynchronously read the 'pending' outbox and publish to the broker.
+```
+
+### Anti-Pattern — The Dual-Write Vulnerability
+
+```ts
+// Anti-Pattern: If the broker is down, the DB is updated but the rest of the system never knows.
+await database.users.update(userId, newProfile);
+await messageBroker.publish('user.profile.updated', newProfile);
+```
+
+---
+
+## Rule 2 — Idempotent Consumers
+
+"Exactly-once delivery" is a myth in distributed systems at scale; brokers promise "at-least-once delivery." Therefore, every event consumer MUST be structurally idempotent. Processing the exact same event a second time MUST have no adverse side effects. 
+
+### Recommended Pattern — Deduplication Keys
+
+```ts
+export class PaymentProcessedEventHandler {
+  async handle(event: Event<PaymentPayload>) {
+    // Rely on an atomic constraint (e.g., a processed_events table or Redis lock)
+    // using the unique event.messageId to ensure we don't grant items twice.
+    const isNew = await this.idempotencyLayer.checkAndLock(event.messageId);
+    
+    if (!isNew) {
+      logger.info(ctx, `Ignoring duplicate event ${event.messageId}`);
+      return; 
+    }
+
+    await this.inventory.grantItems(event.payload.items);
+  }
+}
+```
+
+---
+
+## Rule 3 — Dead Letter Queues (DLQ)
+
+If an event consumer fails to process a message repeatedly (e.g., due to a malformed Zod payload or prolonged downstream outage), the consumer MUST NOT discard the message, nor MUST it blindly retry forever (blocking the queue). It MUST route the poison message to a Dead Letter Queue for delayed inspection and replay tracking.
+
+---
+
+## AI Checklist — Run Before Completing Any Event-Driven Task
+
+* [ ] Database mutations and outward Event Emissions utilize a Transactional Outbox.
+* [ ] Event Handlers implement idempotency checks against unique `eventId` tracking.
+* [ ] Message broker infrastructure defines explicit retry limits and Dead Letter Queue routing.
+* [ ] Events carry the requisite Distributed Tracing correlation IDs.

@@ -1,0 +1,80 @@
+---
+description: Enforce Circuit Breakers, Retries, and Rate Limiting for all inter-service and external network dependencies.
+globs:
+  - "**/adapters/**/*.{ts,js,py,go,java}"
+  - "**/clients/**/*.{ts,js,py,go,java}"
+alwaysApply: false
+---
+
+# Fault Tolerance & Resilience — Designing for Failure
+
+## Purpose
+At L6/L7 scale, the assumption is no longer "the network is reliable." External APIs will rate-limit you, databases will experience failovers, and downstream services will crash. Systems must degrade gracefully, prevent cascading failures, and self-heal.
+
+---
+
+## Rule 1 — Circuit Breakers on External Calls
+
+All synchronous calls to an external service or independent bounded context MUST be wrapped in a Circuit Breaker pattern. If the error rate crosses a threshold, the circuit "opens" and immediately fails fast to prevent resource exhaustion (thread/connection pool locking) on the caller's side.
+
+### Recommended Pattern — Circuit Wrapped Execution
+
+```ts
+export class ExternalPaymentAdapter implements IPaymentPort {
+  constructor(private circuitBreaker: ICircuitBreaker) {}
+
+  async chargeBack(id: string): Promise<Result> {
+    // If the payment provider is down, the breaker throws an immediate Exception
+    // rather than waiting 30 seconds for a timeout and locking up our workers.
+    return this.circuitBreaker.execute('payment-provider', async () => {
+      return this.httpClient.post('/charge', { id });
+    });
+  }
+}
+```
+
+---
+
+## Rule 2 — Exponential Backoff on Retries
+
+If an external service returns a transient error (e.g., HTTP 429 Too Many Requests, HTTP 503 Service Unavailable), the caller MUST NOT aggressively poll the endpoint. Retries MUST use exponential backoff, coupled with randomized "jitter" to avoid creating a thundering herd.
+
+### Recommended Pattern — Jittered Backoff
+
+```ts
+const retryStrategy = new RetryWithBackoff({
+  maxRetries: 3,
+  baseDelayMs: 100, // 100ms, 200ms, 400ms...
+  addJitter: true   // +/- random variance prevents mass synchronized retries
+});
+
+await retryStrategy.execute(() => this.database.query(sql));
+```
+
+### Anti-Pattern — Fixed Polling Loops
+
+```ts
+// Anti-Pattern: Overwhelms recovering services with synchronized traffic bursts
+for (let i = 0; i < 3; i++) {
+  try {
+    return await api.call();
+  } catch (e) {
+    await sleep(1000); // 💀 Linear retry
+  }
+}
+```
+
+---
+
+## Rule 3 — Sensible Timeouts & Deadlines
+
+Indefinite blocking is strictly forbidden. Every network call, database query, and queue pop MUST have an explicit, short timeout. Furthermore, complex distributed workflows MUST enforce a global "Deadline" context (e.g., if a user request has 5 seconds to live, internal services shouldn't spend 6 seconds fetching secondary data).
+
+---
+
+## AI Checklist — Run Before Completing Any Infrastructure Task
+
+* [ ] External API Adapters implement Circuit Breakers.
+* [ ] Retry logic relies explicitly on Exponential Backoff and Jitter.
+* [ ] All HTTP client configurations specify hard timeout limits (no default infinite hangs).
+* [ ] Database connection pools establish explicit query timeout lengths.

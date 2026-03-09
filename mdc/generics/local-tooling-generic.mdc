@@ -1,0 +1,84 @@
+---
+description: Enforce structured local tool creation, native framework scaffolding CLI usage, and safe file discovery across the monorepo.
+globs:
+  - "**/*.{ts,js,sh}"
+  - "**/scripts/**/*"
+alwaysApply: false
+---
+
+# Local Tooling & Scaffolding — Developer Experience
+
+## Purpose
+At L5 scale, "how you work" is as important as "what you build." Relying on manual file creation leads to inconsistent architectures (missing test files, wrong imports). Relying on messy bash scripts breaks local environments. This rule enforces rigorous, predictable developer tooling.
+
+---
+
+## Rule 1 — Framework Native Scaffolding First
+
+Engineers MUST prioritize native framework CLIs (e.g., Angular CLI, NestJS CLI, Rails generators) over manually creating files or writing custom scaffolding scripts. 
+
+### Recommended Pattern — Scaffold via Tooling
+```bash
+# Correctly generates the component, its spec file, its CSS, and updates the necessary module registry.
+npx ng generate component pages/user-profile --standalone
+```
+
+### Anti-Pattern — Hand-rolled files
+```bash
+# Anti-Pattern: Manually creating files bypasses standard boilerplate, linting rules, and dependency wiring.
+touch src/app/pages/user-profile.component.ts
+```
+
+---
+
+## Rule 2 — Strict Bash Script Standardization
+
+Any automation, build step, or utility bash script MUST follow a strictly typed template. Scripts MUST validate their execution environment, enforce argument requirements, and exit safely on failure (`set -euo pipefail`).
+
+### Recommended Pattern — The L5 Script Template
+
+```bash
+#!/usr/bin/env bash
+# Description: <Brief description>
+# Usage: <script-name> <required_arg> [optional_arg]
+
+set -euo pipefail
+
+log_err() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
+
+# 1. Dependency Validation (Fail fast if missing tools)
+readonly DEPENDENCIES=('jq' 'curl')
+for cmd in "${DEPENDENCIES[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        log_err "Missing required dependency: $cmd"
+        exit 1
+    fi
+done
+
+# 2. Argument Validation (Fail fast on bad input)
+readonly REQUIRED_ARGS=1
+if [[ "$#" -lt "$REQUIRED_ARGS" ]]; then
+    log_err "Insufficient arguments. Expected $REQUIRED_ARGS, got $#."
+    exit 1
+fi
+
+# 3. Main Logic
+echo "Executing safely..."
+```
+
+---
+
+## Rule 3 — Codebase Exploration 
+
+Blindly guessing filenames or grepping without boundaries is forbidden. Engineers MUST rely on fast, deterministic terminal search tools (`rg`, `find`) to map the area before applying changes.
+
+* **Search by content:** `rg "<search_term>"`
+* **Search by filename:** `find . -name "*.routes.ts"`
+
+---
+
+## AI Checklist — Run Before Completing Any Tooling Task
+
+* [ ] New components/services were created via official framework CLIs.
+* [ ] New bash scripts enforce `set -euo pipefail` and validate missing dependencies.
+* [ ] Utility scripts are isolated in a standard `/scripts` or `~/bin` directory with restrictive execution permissions (`chmod 700`).

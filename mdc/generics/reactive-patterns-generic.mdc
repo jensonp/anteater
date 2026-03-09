@@ -1,0 +1,115 @@
+---
+description: Enforce safe concurrency strategies, automatic cleanup, and clean local UI state management across frontend components.
+globs:
+  - "**/components/**/*.{tsx,jsx,vue,ts,js}"
+  - "**/pages/**/*.{tsx,jsx,vue,ts,js}"
+  - "**/hooks/**/*.{ts,js}"
+alwaysApply: false
+---
+
+# Reactive Patterns — Concurrency, Cleanup & UI State
+
+## Why This Rule Exists
+
+Incorrect handling of asynchronous streams causes **race conditions** (stale search results overwriting fresh ones) and **duplicate side effects** (double-submitting a save button). Forgotten connection cleanups cause **memory leaks** that linger and duplicate. This rule eliminates all three categories by mandating the appropriate behavioral pattern for each user interaction type.
+
+---
+
+## Rule 1 — Cancel Stale Flow on Search / Typeahead
+
+Any async pipeline triggered by **rapid user input** (keystrokes, autocomplete, filter changes) **MUST** automatically cancel the previous in-flight request when a new value arrives to prevent stale responses.
+
+### Recommended Pattern — Stale requests are explicitly cancelled
+
+```ts
+// Generic approach: AbortController or a stream mechanism like `switchMap`
+let abortController;
+
+function onSearchInput(query) {
+  if (abortController) abortController.abort();
+  abortController = new AbortController();
+
+  searchApi(query, { signal: abortController.signal })
+    .then(results => updateUI(results))
+    .catch(err => { if (err.name !== 'AbortError') handleError(); });
+}
+```
+
+### Anti-Pattern — Parallel requests permitted
+
+```ts
+// Anti-Pattern: No cancellation; if the first request is slow, it overwrites the newer request
+function onSearchInput(query) {
+  searchApi(query).then(results => updateUI(results));
+}
+```
+
+---
+
+## Rule 2 — Ignore Duplicates for Save/Submit Actions
+
+Any pipeline triggered by an **action performing a write operation** (save, checkout, submit form) **MUST** ignore or visibly block subsequent triggers while the first request is still in flight (e.g., via `exhaustMap`, request locking, or disabling UI).
+
+### Recommended Pattern — Subsequent triggers are blocked gracefully
+
+```ts
+let isSaving = false;
+
+async function onSubmit(payload) {
+  if (isSaving) return; // ignore duplicate clicks
+  isSaving = true;
+
+  try {
+    await saveApi(payload);
+  } finally {
+    isSaving = false;
+  }
+}
+```
+
+### Anti-Pattern — Triggers queue up or execute simultaneously
+
+```ts
+// Anti-Pattern: Double-clicking the button fires two database writes
+async function onSubmit(payload) {
+  await saveApi(payload);
+}
+```
+
+---
+
+## Rule 3 — Mandatory Resource Cleanup
+
+Every persistent subscription, stream, or event listener initiated by a UI component **MUST** be paired with a corresponding cleanup strategy tied to the component's lifecycle destruction to avoid memory leaks.
+
+### Recommended Pattern — Listener is removed on destroy
+
+```ts
+// Generic representation (e.g. React useEffect, Vue onUnmounted)
+function onMount() {
+  const handler = () => { /* ... */ };
+  window.addEventListener('resize', handler);
+
+  return function cleanup() {
+    window.removeEventListener('resize', handler);
+  };
+}
+```
+
+### Anti-Pattern — Listener or subscription leaks
+
+```ts
+// Anti-Pattern: Component unmounts, but the subscription lives forever
+function onMount() {
+  globalStream.subscribe(data => updateUI(data));
+}
+```
+
+---
+
+## AI Checklist — Run Before Completing Any Frontend Task
+
+- [ ] Search / typeahead inputs automatically abort or switch to the latest in-flight request.
+- [ ] Submit / save buttons block or ignore subsequent clicks until the request completes.
+- [ ] Every persistent stream, timer, or listener sets up a corresponding destruction cleanup.
+- [ ] Loading and error UI state flags correctly initialize, update, and reset safely during the user interaction lifecycle.

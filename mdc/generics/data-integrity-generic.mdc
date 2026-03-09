@@ -1,0 +1,121 @@
+---
+description: Enforce runtime validation on every external data boundary across all services — APIs, DBs, and untrusted payloads.
+globs:
+  - "**/services/**/*.{ts,js,py,go}"
+  - "**/routes/**/*.{ts,js,py,go}"
+  - "**/controllers/**/*.{ts,js,py,go}"
+  - "**/schemas/**/*.{ts,js,py,go}"
+alwaysApply: false
+---
+
+# Data Integrity — Runtime Validation
+
+## Why This Rule Exists
+
+Without runtime schema validation, data crossing a **trust boundary** (external APIs, database result rows, webhook payloads) can silently deviate from what the application expects. A single missing or incorrectly typed field cascades into runtime crashes deep within business logic. This rule ensures the application **fails fast and cleanly** at the boundary.
+
+---
+
+## Rule 1 — Validate Every External Data Boundary
+
+Every external API call, database query result, or message queue payload **MUST** be validated against a Zod schema (or equivalent runtime validator) immediately after retrieval — before any business logic touches it. Use a robust validation library (e.g., Zod, Pydantic, Joi, Valibot).
+
+### Covered Boundaries
+
+| Boundary Type          | Examples                                                  |
+|------------------------|-----------------------------------------------------------|
+| HTTP client responses  | REST API calls, generic HTTP client responses             |
+| Database query results | Raw rows from a database client                           |
+| Queue / event payloads | Pub/Sub messages, worker job data, WebSocket frames       |
+| File / config reads    | JSON files, environment-driven config objects             |
+
+### Recommended Pattern — Validate immediately after retrieval
+
+```ts
+// Generic Example
+const raw = await httpClient.get(url);
+const result = ExternalPayloadSchema.safeParse(raw.data);
+
+if (!result.success) {
+  // map to domain error and handle properly
+}
+
+return result.data; // fully validated
+```
+
+### Anti-Pattern — Accessing unvalidated data directly
+
+```ts
+// Anti-Pattern: No runtime guarantee this shape exists — silent undefined propagation
+const raw = await httpClient.get(url);
+const items = raw.data.response.items;
+```
+
+---
+
+## Rule 2 — Infer Types from Schemas
+
+Type definitions for external responses **MUST** be derived from their validation schema. Manually written type/interface declarations for external data are **forbidden** — they silently drift from the actual validation logic.
+
+### Recommended Pattern — Single source of truth
+
+```ts
+// Schema defines the runtime validation and infers the compile-time type
+export const UserSchema = schemaLibrary.object({
+  id: schemaLibrary.number(),
+  name: schemaLibrary.string(),
+});
+
+export type UserType = inferType<typeof UserSchema>;
+```
+
+### Anti-Pattern — Manual type that can drift
+
+```ts
+// Anti-Pattern: This interface lives independently of validation logic
+interface UserType {
+  id: number;
+  name: string;
+}
+```
+
+---
+
+## Rule 3 — Map Validation Failures to Custom Domain Errors
+
+Raw validation errors **MUST NEVER** be returned or leaked to the client. On validation failure, the code must:
+
+1. **Log** the full validation issues internally with contextual metadata.
+2. **Throw** a custom domain error that a global error handler maps to a safe response.
+
+### Recommended Pattern — Domain Error Mapping
+
+```ts
+const result = ExternalPayloadSchema.safeParse(raw.data);
+
+if (!result.success) {
+  logger.error('API validation failed', { endpoint, issues: result.error.issues });
+  throw new UpstreamDependencyMalformedError(endpoint, result.error.issues);
+}
+```
+
+### Anti-Pattern — Leaking raw validation errors to the client
+
+```ts
+// Anti-Pattern: Exposes internal schema details and validation logic to the outside world
+try {
+  return ExternalPayloadSchema.parse(raw.data);
+} catch (err) {
+  response.status(400).json(err);
+}
+```
+
+---
+
+## AI Checklist — Run Before Completing Any Backend Task
+
+- [ ] Every external call result is parsed and validated (e.g., `.safeParse()`).
+- [ ] Every raw Database query or Queue payload is validated.
+- [ ] The type definition is strictly inferred from the schema.
+- [ ] Validation failures throw a **custom domain error**, never a raw library error.
+- [ ] No type assertions (`as Type`) are used to indiscriminately cast external data.

@@ -1,0 +1,104 @@
+---
+description: Meta-template governing how to structure, scaffold, and validate any new operational .mdc rule file.
+globs:
+  - ".cursor/rules/**/*.mdc"
+alwaysApply: true
+---
+
+# Operational Rule Template — The Rule for Writing Rules
+
+## Why This Rule Exists
+
+Without a consistent structure, rule files drift into vague prose that developers and AI apply loosely. Every `.mdc` file in this project must follow the same four-pillar architecture so that rules are **parseable**, **auditable**, and **enforceable**. This meta-template is the single source of truth for that structure.
+
+---
+
+## The Four Pillars — Required in Every `.mdc` File
+
+Every operational `.mdc` file **MUST** contain these four sections, in this order:
+
+1. **TRIGGER (Scope):** WHERE does this rule fire? (globs, layers)
+2. **CORE CONSTRAINT (Logic):** WHAT is the non-negotiable mandate?
+3. **ARCHITECTURAL STANDARD (Technique):** HOW must it be implemented? (patterns, naming conventions)
+4. **OPERATIONAL SAFETY (Lifecycle / Error Handling):** WHAT HAPPENS when it fails or ends? (recovery, teardown)
+
+---
+
+## Pillar 1 — Trigger (Scope)
+
+Defines **where** the rule activates. Must map to concrete glob patterns in the frontmatter.
+
+### Recommended Pattern — Precise scope
+
+```yaml
+globs:
+  - "**/services/**/*.js"
+  - "**/adapters/**/*.js"
+```
+
+### Anti-Pattern — Vague scope
+
+```yaml
+globs:
+  - "**/*" # Anti-Pattern: Fires everywhere - too broad
+```
+
+---
+
+## Pillar 2 — Core Constraint (Logic)
+
+The **non-negotiable mandate** — a single, absolute statement that admits no exceptions.
+
+### Recommended Pattern
+
+```markdown
+Every external runtime boundary **MUST** validate raw data via a schema library.
+```
+
+### Anti-Pattern
+
+```markdown
+Try to validate API responses when possible. <!-- Anti-Pattern: Weasel words -->
+```
+
+---
+
+## Pillar 3 — Architectural Standard (Technique)
+
+Defines **how** the mandate must be implemented. Use concrete naming conventions, directory trees, and standard patterns.
+
+### Recommended Pattern
+
+Provide clear code block examples (`Recommended Pattern` vs `Anti-Pattern`) illustrating the pattern application versus its anti-patterns.
+
+---
+
+## Pillar 4 — Operational Safety (Lifecycle / Error Handling)
+
+Defines **what happens when things fail or end**. Every rule must account for its failure mode and teardown.
+
+### Recommended Pattern
+
+```markdown
+If validation fails:
+1. Log issues contextually.
+2. Throw a domain boundary error.
+3. Propagate to a safe response.
+```
+
+---
+
+## Required Documentation Elements
+
+1. **"Why This Rule Exists" Section:** At the very top, define the concrete pain this prevents.
+2. **Example Pairs:** For each constraint, provide at least one `Recommended Pattern` example and one `Anti-Pattern` example.
+3. **AI Checklist:** Conclude the rule document with an actionable, verifiable checklist for task completion.
+
+---
+
+## AI Checklist — Run Before Generating Any New `.mdc` File
+
+- [ ] YAML frontmatter defines precise `globs`.
+- [ ] Contains all four pillars: Scope, Logic, Technique, and Safety.
+- [ ] Uses Recommended Pattern and Anti-Pattern code block examples for clarity.
+- [ ] Ends with an actionable and binary AI validation checklist.

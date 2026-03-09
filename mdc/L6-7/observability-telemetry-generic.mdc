@@ -1,0 +1,89 @@
+---
+description: Enforce distributed tracing, structured logging, and golden signal metrics across all service boundaries.
+globs:
+  - "**/*.{ts,js,py,go,java,cs}"
+alwaysApply: false
+---
+
+# Observability & Telemetry — Distributed Insight
+
+## Purpose
+At L6/L7 scale, systems handle millions of requests across dozens of microservices. "Print" statements and raw log files are functionally useless during a Sev-1 outage. Systems must emit structured, traceable telemetry to keep Mean Time To Resolution (MTTR) as low as possible. 
+
+---
+
+## Rule 1 — Distributed Tracing Context Propagation
+
+Every incoming request MUST initiate or extract a correlation ID (e.g., OpenTelemetry Trace ID, AWS X-Ray Trace ID). This exact context MUST be cascaded to all downstream HTTP calls, database queries, and asynchronous event publications.
+
+### Recommended Pattern — Propagating the Trace
+
+```ts
+export class OrderService {
+  constructor(private readonly httpClient: IHttpClient) {}
+
+  async processOrder(ctx: RequestContext, orderId: string) {
+    // The context object automatically holds trace data
+    logger.info(ctx, `Processing order ${orderId}`);
+    
+    // The HTTP client automatically appends the trace headers
+    await this.httpClient.post('/inventory/reserve', payload, { context: ctx });
+  }
+}
+```
+
+### Anti-Pattern — Context Dropping
+
+```ts
+// Anti-Pattern: No trace ID is passed. If inventory fails, we have no idea which order caused it.
+export class OrderService {
+  async processOrder(req: any, orderId: string) {
+    console.log(`Processing order ${orderId}`); 
+    await axios.post('/inventory/reserve', payload);
+  }
+}
+```
+
+---
+
+## Rule 2 — Structured Logging (JSON)
+
+Logs MUST be emitted as structured, machine-parseable JSON objects. They MUST contain standard metadata (e.g., `traceId`, `userId`, `action`, `level`, `timestamp`). Raw multi-line string logs are strictly forbidden.
+
+### Recommended Pattern — JSON Telemetry
+
+```ts
+// Emits: {"level":"error", "traceId":"abc-123", "userId":"user-99", "action":"inventory_reservation", "message":"Out of stock"}
+logger.error(ctx, 'Out of stock', {
+  action: 'inventory_reservation',
+  itemId: item.id
+});
+```
+
+### Anti-Pattern — String Concatenation
+
+```ts
+// Anti-Pattern: Cannot be queried or indexed effectively by Datadog/Splunk/ELK
+console.error(`[ERROR] User ${user.id} failed to reserve item ${item.id} due to stock issues.`);
+```
+
+---
+
+## Rule 3 — Golden Signal Metrics
+
+Every API and persistent connection MUST automatically emit the Four Golden Signals for every endpoint:
+1. **Latency:** How long the request takes.
+2. **Traffic:** How much demand is placed on the system.
+3. **Errors:** Rate of failing requests.
+4. **Saturation:** How "full" the service is (CPU, Memory, Connection Pools).
+
+*These should be tracked via middleware/interceptors, not scattered throughout business logic.*
+
+---
+
+## AI Checklist — Run Before Completing Any Telemetry Task
+
+* [ ] Incoming requests natively parse or generate correlation/trace IDs.
+* [ ] External network clients correctly propagate headers via a Context object.
+* [ ] Logging is configured to output structured JSON with trace keys attached.
+* [ ] Controllers/Routes employ middleware to record Latency, Traffic, and Error metrics.

@@ -1,0 +1,103 @@
+---
+description: Enforce Dependency Inversion (Ports/Adapters), Bounded Context isolation, and strict layer separation to ensure the system remains modular and testable.
+globs:
+  - "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# Structural Integrity — Layer Isolation & Dependency Inversion
+
+## Purpose
+To prevent infrastructure coupling and ensure business logic remains isolated from external changes. High-level policy must depend on abstractions (Interfaces), not volatile implementations.
+
+---
+
+## Rule 1 — Dependency Inversion (Ports & Adapters)
+
+Every core service or external infrastructure client MUST be defined by an **Interface (Port)** first. Business logic classes must inject the interface, never the concrete implementation.
+
+### Recommended Pattern — Depending on an Abstraction
+```ts
+// src/ports/data-provider.port.ts
+export interface IExternalDataProvider {
+  fetchLibraryData(id: string): Promise<DataPayload>;
+}
+
+// src/services/core-logic.service.ts
+export class CoreService {
+  constructor(private provider: IExternalDataProvider) {} // Injected via Port
+}
+```
+
+### Anti-Pattern — Depending on a Concrete Class
+
+```ts
+// Anti-Pattern: Coupling to a specific API client makes mocking and swapping sources impossible
+import { SpecificApiClient } from './external-api.service';
+
+export class CoreService {
+  private apiClient = new SpecificApiClient(); 
+}
+```
+
+---
+
+## Rule 2 — Context Isolation (Anti-Corruption Layer)
+
+Distinct Bounded Contexts must not share internal service methods directly. All cross-context interaction must happen through an **Application Service** or an **Event Bus**.
+
+### Recommended Pattern — Orchestrating across contexts
+
+```ts
+export class OrchestrationService {
+  constructor(
+    private userService: IUserService,
+    private analyticService: IAnalyticService
+  ) {}
+
+  async processRequest(id: string) {
+    const data = await this.userService.getUserData(id);
+    return this.analyticService.calculate(data);
+  }
+}
+```
+
+---
+
+## Rule 3 — Strict Layer Separation
+
+Logic must reside strictly within its designated layer. "Layer bleeding" (e.g., database queries in a network route) is strictly forbidden.
+
+| Layer | Responsibility | Forbidden Actions |
+| --- | --- | --- |
+| **Routes** | Request parsing, Input validation | No Business Logic, No SQL/Querying |
+| **Services** | Domain rules, Business math, Logic | No Request/Response objects |
+| **Adapters** | Data persistence, External API calls | No UI logic, No Business rules |
+
+---
+
+## Rule 4 — Zero Hardcoded Configuration
+
+No magic strings, URLs, or secrets are allowed in the logic. All environmental settings must be retrieved from a central, validated **Configuration Manager**.
+
+### Recommended Pattern
+
+```ts
+const apiBase = config.externalApiBaseUrl; // Sourced from validated config
+```
+
+### Anti-Pattern
+
+```ts
+// Anti-Pattern: Hardcoded values create hidden dependencies and security risks
+const apiBase = 'https://api.thirdparty.com/v1';
+```
+
+---
+
+## AI Checklist — Run Before Completing Any Architectural Task
+
+* [ ] Every new service or infrastructure client is defined by an `interface` in a `/ports` directory.
+* [ ] Business logic is physically isolated from HTTP (Routes) and Data (Adapters) layers.
+* [ ] Cross-context interaction happens exclusively via Application Services or DTOs.
+* [ ] Every external setting or URL is sourced from the validated `config` object.

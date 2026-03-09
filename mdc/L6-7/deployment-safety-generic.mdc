@@ -1,0 +1,82 @@
+---
+description: Enforce zero-downtime deployment capabilities, backward compatibility, and feature flag management for continuous delivery.
+globs:
+  - "**/migrations/**/*.{sql,ts,js,py,go}"
+  - "**/*.{ts,js,py,go,java}"
+alwaysApply: false
+---
+
+# Deployment Safety — Zero-Downtime Delivery
+
+## Purpose
+At L6/L7 scale, maintenance windows don't exist. "Deploying code" must be entirely decoupled from "Releasing features." Systems must be capable of deploying hundreds of times a day safely without dropping a single active transaction. 
+
+---
+
+## Rule 1 — Expand-and-Contract Database Migrations
+
+Database schema changes MUST be non-destructive and backward compatible to support instances of V1 and V2 application code running simultaneously during a rolling deployment. "ALTER TABLE DROP COLUMN" or synchronous column renames are strictly forbidden.
+
+### Recommended Pattern — Expand Phase
+
+1. **Deploy 1:** Add the new column `fullName`. Both V1 and V2 code run. V2 writes to both `firstName`/`lastName` AND `fullName`. V1 still works perfectly.
+2. **Deploy 2:** Backfill data in the background. V2 code now reads from `fullName`. 
+3. **Deploy 3 (Contract):** Once all nodes are verified on V2, drop the old `firstName` and `lastName` columns.
+
+### Anti-Pattern — Breaking Deployments
+
+```sql
+-- Anti-Pattern: The instant this runs, any V1 APIs handling active traffic will crash
+-- because they expect 'firstName' and 'lastName' to exist.
+ALTER TABLE users 
+  DROP COLUMN first_name, 
+  DROP COLUMN last_name, 
+  ADD COLUMN full_name VARCHAR(255);
+```
+
+---
+
+## Rule 2 — Decouple Deployment from Release (Feature Flags)
+
+Code MUST be merged to the main branch and deployed to production frequently, even if the feature itself is incomplete. Any new business logic branch MUST be wrapped in a dynamic Feature Flag that defaults to `OFF` (or targets specific user cohorts). 
+
+### Recommended Pattern — Dark Launching
+
+```ts
+export class RecommendationService {
+  constructor(private flags: IFeatureFlagClient) {}
+
+  async getRecommendations(user: User) {
+    // Code goes to production perfectly safely, turned off.
+    // Product Managers can turn it on selectively without an engineering deploy.
+    if (await this.flags.isEnabled('USE_AI_RECOMMENDATION_V2', user)) {
+      return this.executeNewAlgorithm(user);
+    }
+    
+    return this.executeLegacyAlgorithm(user);
+  }
+}
+```
+
+---
+
+## Rule 3 — Graceful Shutdown Lifecycle
+
+Services MUST NOT blindly terminate halfway through tasks when the orchestration platform (e.g., Kubernetes) scales down a pod or deploys new code. Services MUST intercept the `SIGTERM` signal and gracefully drain connections.
+
+### Recommended Pattern — Safe Draining
+
+1. Stop accepting new HTTP requests (fail readiness probes).
+2. Allow active HTTP requests to complete within a buffer window (e.g., 20 seconds).
+3. Drain ongoing background tasks or message queue workers without popping new tasks.
+4. Safely sever Database/Redis connection pools.
+5. Exit process.
+
+---
+
+## AI Checklist — Run Before Completing Any Delivery/Schema Task
+
+* [ ] Database migrations rely on Expand-and-Contract patterns—no immediate destructive actions.
+* [ ] Logic changes are wrapped securely with runtime-configurable Feature Flags.
+* [ ] Boot sequences include readiness probes to ensure the DB is connected before binding HTTP ports.
+* [ ] The application lifecycle listens for `SIGTERM` to facilitate graceful draining.
